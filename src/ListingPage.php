@@ -73,6 +73,10 @@ class ListingPage extends Page
 
     private static $icon = 'symbiote/silverstripe-listingpage: client/images/listingpage.png';
 
+    private static $allow_source_replacement = false;
+
+    private $replacementSourceID = null;
+
     public function getCMSFields()
     {
         $fields = parent::getCMSFields();
@@ -203,17 +207,69 @@ class ListingPage extends Page
     }
 
     /**
-     * Some subclasses will want to override this.
+     * Determine the record to use as the source.
      *
+     * @param $useReplacement Use a replacement record ID if one has been set
      * @return DataObject
      */
-    protected function getListingSource()
+    protected function getListingSource($useReplacement = true)
     {
         $sourceType = $this->effectiveSourceType();
-        if ($sourceType && $this->ListingSourceID) {
-            return DataObject::get_by_id($sourceType, $this->ListingSourceID);
+        if ($useReplacement) {
+            $sourceID = $this->replacementSourceID ? $this->replacementSourceID : $this->ListingSourceID;
+        } else {
+            $sourceID = $this->ListingSourceID;
+        }
+        if ($sourceType && $sourceID) {
+            return DataObject::get_by_id($sourceType, $sourceID);
         }
     }
+
+    /**
+     * Set a custom source ID.
+     *
+     * Must be hierarchically under the ListingSourceID record.
+     *
+     * @return boolean If the replacement is valid, true; otherwise, false.
+     */
+    public function replaceSourceID($id)
+    {
+        $parent = $this->getListingSource(false);
+        $sourceType = $this->effectiveSourceType();
+        if ($parent && $sourceType && $this->isUnderSource($parent, $id)){
+            $this->replacementSourceID = $id;
+            return true;
+        }
+
+        return false;
+    }
+
+    public function getReplacedSourceID()
+    {
+        return $this->replacementSourceID;
+    }
+
+    private function isUnderSource($parent, $id)
+    {
+        $children = $parent->AllChildren();
+
+        return ($children->count() && $this->recursiveUnderSource($id, $children))
+            ? true
+            : false;
+	}
+
+    private function recursiveUnderSource($id, $children)
+    {
+		foreach ($children as $child) {
+            if ($child->ID == $id) return true;
+            $deeper = $child->AllChildren();
+			if ($deeper->count() && $this->recursiveUnderSource($id, $deeper)) {
+				return true;
+			}
+        }
+
+		return false;
+	}
 
     /**
      * Sometimes the type of a listing source will be different from that of the item being listed (eg
@@ -259,7 +315,6 @@ class ListingPage extends Page
     {
         // need to get the items being listed
         $source = $this->getListingSource();
-
         $listType = $this->ListType ? $this->ListType : 'Page';
 
         $filter = array();
@@ -296,7 +351,6 @@ class ListingPage extends Page
             $page = isset($_REQUEST[$pageUrlVar]) ? (int) $_REQUEST[$pageUrlVar] : 0;
             $items  = $items->limit($this->PerPage, $page);
         }
-
 
         if ($this->ComponentFilterName) {
             $controller = (Controller::has_curr()) ? Controller::curr() : null;
